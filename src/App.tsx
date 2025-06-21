@@ -16,6 +16,11 @@ import NetWorthForm from './components/NetWorthForm'
 import NetWorthStats from './components/NetWorthStats'
 import TargetForm from './components/TargetForm'
 import { NetWorthEntry, TargetSettings } from './types'
+import AuthButton from './components/AuthButton'
+import { onAuthStateChanged, User } from 'firebase/auth'
+import { auth } from './firebase'
+import { db } from './firebase'
+import { collection, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
 
 ChartJS.register(
   CategoryScale,
@@ -28,16 +33,24 @@ ChartJS.register(
   Filler
 )
 
-function App() {
-  const [entries, setEntries] = useState<NetWorthEntry[]>(() => {
-    const saved = localStorage.getItem('netWorthEntries')
-    return saved ? JSON.parse(saved) : []
-  })
+function removeUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefined);
+  } else if (obj && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([_, v]) => v !== undefined)
+        .map(([k, v]) => [k, removeUndefined(v)])
+    );
+  }
+  return obj;
+}
 
-  const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(() => {
-    const saved = localStorage.getItem('targetSettings')
-    return saved ? JSON.parse(saved) : null
-  })
+function App() {
+  const [entries, setEntries] = useState<NetWorthEntry[]>([]);
+  const [targetSettings, setTargetSettings] = useState<TargetSettings | null>(null);
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     localStorage.setItem('netWorthEntries', JSON.stringify(entries))
@@ -47,16 +60,60 @@ function App() {
     localStorage.setItem('targetSettings', JSON.stringify(targetSettings))
   }, [targetSettings])
 
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, setUser)
+    return () => unsub()
+  }, [])
+
+  // Firestore sync for logged-in users
+  useEffect(() => {
+    if (!user) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    const userDoc = doc(db, 'users', user.uid)
+    const unsub = onSnapshot(userDoc, (docSnap) => {
+      const data = docSnap.data()
+      setEntries(data?.entries || [])
+      setTargetSettings(data?.targetSettings || null)
+      setLoading(false)
+    })
+    return () => unsub()
+  }, [user])
+
+  // Save to localStorage for guests (for session only, not persistent)
+  useEffect(() => {
+    if (user) return
+    // No-op: data is in memory only for guests
+  }, [entries, targetSettings, user])
+
+  // Write to Firestore only when data changes (not on every render)
+  const saveToFirestore = (newEntries: NetWorthEntry[], newTargetSettings: TargetSettings | null) => {
+    if (!user) return;
+    const userDoc = doc(db, 'users', user.uid);
+    setDoc(userDoc, removeUndefined({ entries: newEntries, targetSettings: newTargetSettings }), { merge: true });
+  };
+
   const addEntry = (entry: NetWorthEntry) => {
-    setEntries(prev => [...prev, entry].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()))
+    setEntries(prev => {
+      const updated = [...prev, entry].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      if (user) saveToFirestore(updated, targetSettings);
+      return updated;
+    });
   }
 
   const deleteEntry = (id: string) => {
-    setEntries(prev => prev.filter(entry => entry.id !== id))
+    setEntries(prev => {
+      const updated = prev.filter(entry => entry.id !== id);
+      if (user) saveToFirestore(updated, targetSettings);
+      return updated;
+    });
   }
 
   const updateTarget = (target: TargetSettings | null) => {
-    setTargetSettings(target)
+    setTargetSettings(target);
+    if (user) saveToFirestore(entries, target);
   }
 
   // Generate target trajectory data
@@ -204,17 +261,27 @@ function App() {
 
   const latestEntry = entries[entries.length - 1]
 
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-screen text-lg">Loading...</div>
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Net Worth Tracker
-          </h1>
-          <p className="text-lg text-gray-600">
-            Track your financial progress over time
-          </p>
+        <div className="flex flex-col sm:flex-row items-center justify-between mb-8">
+          <div className="text-center sm:text-left mb-4 sm:mb-0">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              Net Worth Tracker
+            </h1>
+            <p className="text-lg text-gray-600">
+              Track your financial progress over time
+            </p>
+            {!user && (
+              <span className="inline-block mt-2 px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-semibold">Guest Mode: Data will not be saved</span>
+            )}
+          </div>
+          <AuthButton />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
