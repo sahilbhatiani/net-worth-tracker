@@ -11,7 +11,7 @@ import {
   Legend,
   Filler
 } from 'chart.js'
-import { Plus, TrendingUp, DollarSign, Calendar } from 'lucide-react'
+import { TrendingUp, DollarSign, Calendar } from 'lucide-react'
 import NetWorthForm from './components/NetWorthForm'
 import NetWorthStats from './components/NetWorthStats'
 import TargetForm from './components/TargetForm'
@@ -20,7 +20,7 @@ import AuthButton from './components/AuthButton'
 import { onAuthStateChanged, User } from 'firebase/auth'
 import { auth } from './firebase'
 import { db } from './firebase'
-import { collection, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore'
+import { doc, setDoc, onSnapshot } from 'firebase/firestore'
 
 ChartJS.register(
   CategoryScale,
